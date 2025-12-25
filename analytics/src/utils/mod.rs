@@ -1,12 +1,13 @@
 use exif::{In, Reader, Tag};
 use serde::Serialize;
 use std::io::Write;
-use std::thread::panicking;
 use std::{
     fs::{self, File},
     io::{self, BufReader},
     path::{Path, PathBuf},
 };
+
+use crate::utils::duplicates::calculate_hash;
 
 pub mod duplicates;
 
@@ -63,6 +64,7 @@ pub enum FileType {
     Image(ImageFormat),
     Video(VideoFormat),
     Folder,
+    Other,
 }
 
 impl FileType {
@@ -87,7 +89,7 @@ impl FileType {
             }
         }
 
-        None
+        Some(FileType::Other)
     }
 
     pub fn is_image(&self) -> bool {
@@ -96,6 +98,15 @@ impl FileType {
 
     pub fn is_video(&self) -> bool {
         matches!(self, FileType::Video(_))
+    }
+
+    pub fn to_string(&self) -> String {
+        match self {
+            FileType::Image(_) => "image".to_string(),
+            FileType::Video(_) => "video".to_string(),
+            FileType::Folder => "folder".to_string(),
+            FileType::Other => "other".to_string(),
+        }
     }
 }
 
@@ -157,6 +168,7 @@ pub struct Media {
     pub file_type: FileType,
     pub file_size: u64,
     pub exif_data: Option<ExifData>,
+    pub hash: String,
 }
 
 impl Media {
@@ -187,32 +199,21 @@ impl Media {
             None
         };
 
+        let hash = calculate_hash(path)?;
+
         Ok(Media {
             file_path: path.to_path_buf(),
             file_name,
             file_type,
             file_size,
             exif_data,
+            hash,
         })
     }
-
-    pub fn file_size_human_readable(&self) -> String {
-        let size = self.file_size as f64;
-        if size < 1024.0 {
-            format!("{} B", size)
-        } else if size < 1024.0 * 1024.0 {
-            format!("{:.2} KB", size / 1024.0)
-        } else if size < 1024.0 * 1024.0 * 1024.0 {
-            format!("{:.2} MB", size / (1024.0 * 1024.0))
-        } else {
-            format!("{:.2} GB", size / (1024.0 * 1024.0 * 1024.0))
-        }
-    }
 }
-pub fn scan_directory(path: &Path, media_items: &mut Vec<Media>) -> io::Result<()> {
-    if !path.is_dir() {
-        return Ok(());
-    }
+// pub fn scan_directory(path: &Path, media_items: &mut Vec<Media>) -> io::Result<()> {
+pub fn scan_directory(path: &Path) -> io::Result<Vec<Media>> {
+    let mut media_items: Vec<Media> = Vec::new();
 
     println!("Scanning dir");
 
@@ -221,19 +222,27 @@ pub fn scan_directory(path: &Path, media_items: &mut Vec<Media>) -> io::Result<(
         let path = entry.path();
 
         if path.is_dir() {
-            scan_directory(&path, media_items);
+            let mut new_scan: Vec<Media> = scan_directory(&path)?;
+            media_items.append(&mut new_scan);
         } else {
-            match Media::new(&path) {
-                Ok(media) => {
-                    println!("Scanned Media {:?}", media.file_name);
-                    media_items.push(media);
-                }
-                Err(e) => {
-                    println!(
-                        "Error while creating; Path : {:?}; Error : {:?}",
-                        path.to_str(),
-                        e
-                    )
+            let file_type = FileType::from_path(&path).unwrap();
+
+            if file_type.is_image() {
+                match Media::new(&path) {
+                    Ok(media) => {
+                        println!("Scanned Media {:?}", media.file_name);
+
+                        if media.file_type.is_image() {
+                            media_items.push(media);
+                        }
+                    }
+                    Err(e) => {
+                        println!(
+                            "Error while creating; Path : {:?}; Error : {:?}",
+                            path.to_str(),
+                            e
+                        )
+                    }
                 }
             }
         }
@@ -241,7 +250,7 @@ pub fn scan_directory(path: &Path, media_items: &mut Vec<Media>) -> io::Result<(
 
     println!("Done media scan");
 
-    Ok(())
+    Ok(media_items)
 }
 
 // Export to JSON
@@ -251,102 +260,6 @@ pub fn export_to_json(media_items: &[Media], output_path: &str) -> io::Result<()
 
     let mut file = File::create(output_path)?;
     file.write_all(json.as_bytes())?;
-
-    println!("✅ Exported to {}", output_path);
-    Ok(())
-}
-
-pub fn export_to_csv(media_items: &[Media], output_path: &str) -> io::Result<()> {
-    let mut wtr =
-        csv::Writer::from_path(output_path).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    // Write headers
-    wtr.write_record(&[
-        "File Name",
-        "File Path",
-        "File Type",
-        "File Size (bytes)",
-        "File Size (Human)",
-        "Camera Make",
-        "Camera Model",
-        "Lens Model",
-        "Date Taken",
-        "ISO",
-        "Aperture",
-        "Shutter Speed",
-        "Focal Length",
-        "Software",
-    ])
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    // Write data
-    for media in media_items {
-        wtr.write_record(&[
-            &media.file_name,
-            media.file_path.to_str().unwrap_or(""),
-            &format!("{:?}", media.file_type),
-            &media.file_size.to_string(),
-            &media.file_size_human_readable(),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.camera_make.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.camera_model.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.lens_model.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.date_taken.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.iso.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.aperture.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.shutter_speed.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.focal_length.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-            media
-                .exif_data
-                .as_ref()
-                .and_then(|e| e.software.as_ref())
-                .map(|s| s.as_str())
-                .unwrap_or(""),
-        ])
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    }
-
-    wtr.flush()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
 
     println!("✅ Exported to {}", output_path);
     Ok(())

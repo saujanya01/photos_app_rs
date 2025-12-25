@@ -1,46 +1,189 @@
 mod utils;
 
-use std::{
-    fmt::Result,
-    fs::{self, metadata},
-    io,
-};
+use std::io;
+use std::time::Instant;
 
-use crate::utils::{
-    FileType, Media, duplicates::export_duplicates_to_csv, duplicates::find_duplicates,
-    duplicates::format_size, export_to_csv, export_to_json, scan_directory,
-};
+use chrono::{Datelike, NaiveDateTime};
+
+use crate::utils::duplicates::{Duplicates, find_duplicates};
+use crate::utils::{Media, scan_directory};
 
 fn main() -> io::Result<()> {
     // let path = "./test_folder";
+
     let path = "/Users/saujanya/sandisk_media";
 
-    let mut media_items = Vec::new();
+    // Measure time for directory scanning
+    let scan_start = Instant::now();
 
-    scan_directory(path.as_ref(), &mut media_items)?;
+    let media_items = scan_directory(path.as_ref())?;
 
-    println!("Exporting full data");
+    let scan_duration = scan_start.elapsed();
 
-    export_to_csv(&media_items, "full.csv");
+    let duplicates = find_duplicates(media_items)?;
 
-    export_to_json(&media_items, "full.json");
+    println!("Scan Duration : {:?}", scan_duration);
 
-    println!("Exported full data");
-
-    let duplicate_media = find_duplicates(media_items)?;
-
-    if !duplicate_media.is_empty() {
-        println!("Found {} groups of duplicates", duplicate_media.len());
-
-        // Calculate total wasted space
-        let total_wasted: u64 = duplicate_media.iter().map(|d| d.total_size).sum();
-        println!("Total wasted space: {}", format_size(total_wasted));
-
-        // Export to CSV
-        export_duplicates_to_csv(duplicate_media, "duplicates.csv")?;
-    } else {
-        println!("No duplicates found!");
-    }
+    export_to_csv(duplicates, "./data.csv")?;
 
     Ok(())
+}
+
+fn final_path_for_media(media: Media) -> String {
+    let date_taken = media
+        .exif_data
+        .as_ref()
+        .and_then(|e| e.date_taken.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    let formatted_date = NaiveDateTime::parse_from_str(date_taken, "%Y-%m-%d %H:%M:%S")
+        .expect("Invalid date time format");
+
+    let year = formatted_date.year();
+    let month = formatted_date.month();
+    let day_of_month = formatted_date.day();
+
+    format!(
+        "{}/{}-{}/{}/{}-{}-{}/{}",
+        year,
+        year,
+        month,
+        media.file_type.to_string(),
+        year,
+        month,
+        day_of_month,
+        media.file_name
+    )
+}
+
+fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
+    let mut wrt =
+        csv::Writer::from_path(output_path).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    wrt.write_record(&[
+        "Hash",
+        "File Name",
+        "Count",
+        "Final File Path",
+        "Old File Path(s)",
+        "File Size (Bytes)",
+        "File Size (Human)",
+        "Camera Make",
+        "Camera Model",
+        "Lens Model",
+        "Date Taken",
+        "ISO",
+        "Aperture",
+        "Shutter Speed",
+        "Focal Length",
+        "Software",
+    ])
+    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    for media in data {
+        // Store temporary String values to avoid dangling references
+        let count_str = media.count.to_string();
+        let final_path = final_path_for_media(media.media.clone());
+        let old_paths = media
+            .files
+            .iter()
+            .filter_map(|f| f.to_str())
+            .collect::<Vec<_>>()
+            .join(";");
+        let file_size_str = media.file_size.to_string();
+        let file_size_human = format_size(media.file_size);
+
+        wrt.write_record(&[
+            &media.hash,
+            &media.media.file_name,
+            &count_str,
+            &final_path,
+            &old_paths,
+            &file_size_str,
+            &file_size_human,
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.camera_make.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.camera_model.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.lens_model.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.date_taken.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.iso.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.aperture.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.shutter_speed.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.focal_length.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+            media
+                .media
+                .exif_data
+                .as_ref()
+                .and_then(|e| e.software.as_ref())
+                .map(|s| s.as_str())
+                .unwrap_or(""),
+        ])
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+    }
+
+    wrt.flush()
+        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
+
+    Ok(())
+}
+
+pub fn format_size(size: u64) -> String {
+    let size = size as f64;
+    if size < 1024.0 {
+        format!("{} B", size)
+    } else if size < 1024.0 * 1024.0 {
+        format!("{:.2} KB", size / 1024.0)
+    } else if size < 1024.0 * 1024.0 * 1024.0 {
+        format!("{:.2} MB", size / (1024.0 * 1024.0))
+    } else {
+        format!("{:.2} GB", size / (1024.0 * 1024.0 * 1024.0))
+    }
 }

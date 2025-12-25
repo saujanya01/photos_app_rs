@@ -8,50 +8,53 @@ use std::{
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::utils::Media;
+use crate::utils::{ExifData, FileType, Media};
+
+const PARTIAL_HASH_SIZE: usize = 128 * 1024; // 128 KB
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Duplicates {
     pub hash: String,
-    pub files: Vec<PathBuf>,
     pub count: usize,
     pub total_size: u64,
+    pub files: Vec<PathBuf>,
+    pub file_type: FileType,
+    pub file_size: u64,
+    pub exif_data: Option<ExifData>,
+    pub media: Media,
 }
 
 pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
-    println!("Finding Duplicates");
-
-    let mut hash_map: HashMap<String, Vec<PathBuf>> = HashMap::new();
-
-    println!("Calculating hashes");
+    let mut hash_map: HashMap<String, Vec<Media>> = HashMap::new();
 
     for media in data {
-        let hash = calculate_hash(&media.file_path)?;
+        let hash = media.hash.clone();
 
         println!("Hash : {:?}", hash);
 
-        hash_map
-            .entry(hash)
-            .or_insert_with(Vec::new)
-            .push(media.file_path);
+        hash_map.entry(hash).or_insert_with(Vec::new).push(media);
     }
 
     println!("Preparing duplicate files data");
 
     let duplicate_files = hash_map
         .into_iter()
-        .filter(|(_, files)| files.len() > 1)
-        .map(|(hash, files)| {
-            let metadata = fs::metadata(&files[0])?;
+        // .filter(|(_, files)| files.len() > 1)
+        .map(|(hash, media_files)| {
+            let metadata = fs::metadata(&media_files[0].file_path)?;
             let file_size = metadata.len();
 
-            println!("Duplcate File : {:?}", files[0]);
+            println!("Duplcate File : {:?}", media_files[0].file_path);
 
             Ok(Duplicates {
                 hash,
-                count: files.len(),
-                total_size: file_size * files.len() as u64,
-                files,
+                count: media_files.len(),
+                total_size: file_size * media_files.len() as u64,
+                files: media_files.iter().map(|f| f.file_path.clone()).collect(),
+                file_type: media_files[0].clone().file_type,
+                file_size: media_files[0].file_size,
+                exif_data: media_files[0].clone().exif_data,
+                media: media_files.get(0).unwrap().clone(),
             })
         })
         .collect::<io::Result<Vec<Duplicates>>>();
@@ -61,70 +64,14 @@ pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
     return duplicate_files;
 }
 
-fn calculate_hash(path: &Path) -> io::Result<String> {
+pub fn calculate_hash(path: &Path) -> io::Result<String> {
     let mut file = File::open(path)?;
-    let mut buffer = Vec::new();
-    file.read_to_end(&mut buffer)?;
+
+    let mut buffer = vec![0u8; PARTIAL_HASH_SIZE];
+    let bytes_read = file.read(&mut buffer)?;
 
     let mut hasher = Sha256::new();
-    hasher.update(&buffer);
+    hasher.update(&buffer[..bytes_read]);
+
     Ok(format!("{:x}", hasher.finalize()))
-}
-
-pub fn export_duplicates_to_csv(
-    duplicate_media: Vec<Duplicates>,
-    output_path: &str,
-) -> io::Result<()> {
-    use std::io::Write;
-
-    let mut wtr =
-        csv::Writer::from_path(output_path).map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    // Write headers
-    wtr.write_record(&[
-        "Hash",
-        "Duplicate Count",
-        "Total Wasted Space (bytes)",
-        "Total Wasted Space (Human)",
-        "File Paths",
-    ])
-    .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    // Write data
-    for dup in duplicate_media {
-        let paths = dup
-            .files
-            .iter()
-            .map(|p| p.to_string_lossy().to_string())
-            .collect::<Vec<_>>()
-            .join(" | ");
-
-        wtr.write_record(&[
-            &dup.hash,
-            &dup.count.to_string(),
-            &dup.total_size.to_string(),
-            &format_size(dup.total_size),
-            &paths,
-        ])
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-    }
-
-    wtr.flush()
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    println!("✅ Exported duplicates to {}", output_path);
-    Ok(())
-}
-
-pub fn format_size(size: u64) -> String {
-    let size = size as f64;
-    if size < 1024.0 {
-        format!("{} B", size)
-    } else if size < 1024.0 * 1024.0 {
-        format!("{:.2} KB", size / 1024.0)
-    } else if size < 1024.0 * 1024.0 * 1024.0 {
-        format!("{:.2} MB", size / (1024.0 * 1024.0))
-    } else {
-        format!("{:.2} GB", size / (1024.0 * 1024.0 * 1024.0))
-    }
 }
