@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use crate::utils::duplicates::calculate_hash;
+use crate::utils::duplicates::{Duplicates, calculate_hash};
 
 pub mod duplicates;
 
@@ -262,5 +262,23 @@ pub fn export_to_json(media_items: &[Media], output_path: &str) -> io::Result<()
     file.write_all(json.as_bytes())?;
 
     println!("✅ Exported to {}", output_path);
+    Ok(())
+}
+
+pub fn export_images_to_new_destination(data: Vec<Duplicates>) -> io::Result<()> {
+    for media in data {
+        copy_file_upsert_dirs(&media.files[0], &media.final_path)?;
+    }
+
+    Ok(())
+}
+
+fn copy_file_upsert_dirs(old_path: &PathBuf, final_path: &PathBuf) -> io::Result<()> {
+    if let Some(parent) = final_path.parent() {
+        fs::create_dir_all(parent)?;
+    }
+
+    fs::copy(old_path, final_path)?;
+
     Ok(())
 }

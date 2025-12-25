@@ -3,10 +3,8 @@ mod utils;
 use std::io;
 use std::time::Instant;
 
-use chrono::{Datelike, NaiveDateTime};
-
 use crate::utils::duplicates::{Duplicates, find_duplicates};
-use crate::utils::{Media, scan_directory};
+use crate::utils::{export_images_to_new_destination, scan_directory};
 
 fn main() -> io::Result<()> {
     // let path = "./test_folder";
@@ -24,37 +22,11 @@ fn main() -> io::Result<()> {
 
     println!("Scan Duration : {:?}", scan_duration);
 
-    export_to_csv(duplicates, "./data.csv")?;
+    export_to_csv(duplicates.clone(), "./test.csv")?;
+
+    export_images_to_new_destination(duplicates)?;
 
     Ok(())
-}
-
-fn final_path_for_media(media: Media) -> String {
-    let date_taken = media
-        .exif_data
-        .as_ref()
-        .and_then(|e| e.date_taken.as_ref())
-        .map(|s| s.as_str())
-        .unwrap_or("");
-
-    let formatted_date = NaiveDateTime::parse_from_str(date_taken, "%Y-%m-%d %H:%M:%S")
-        .expect("Invalid date time format");
-
-    let year = formatted_date.year();
-    let month = formatted_date.month();
-    let day_of_month = formatted_date.day();
-
-    format!(
-        "{}/{}-{}/{}/{}-{}-{}/{}",
-        year,
-        year,
-        month,
-        media.file_type.to_string(),
-        year,
-        month,
-        day_of_month,
-        media.file_name
-    )
 }
 
 fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
@@ -84,7 +56,7 @@ fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
     for media in data {
         // Store temporary String values to avoid dangling references
         let count_str = media.count.to_string();
-        let final_path = final_path_for_media(media.media.clone());
+        let final_path = media.final_path;
         let old_paths = media
             .files
             .iter()
@@ -98,7 +70,7 @@ fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
             &media.hash,
             &media.media.file_name,
             &count_str,
-            &final_path,
+            final_path.to_str().unwrap_or(""),
             &old_paths,
             &file_size_str,
             &file_size_human,

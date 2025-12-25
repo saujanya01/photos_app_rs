@@ -5,12 +5,15 @@ use std::{
     path::{Path, PathBuf},
 };
 
+use chrono::{Datelike, NaiveDateTime};
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
 use crate::utils::{ExifData, FileType, Media};
 
 const PARTIAL_HASH_SIZE: usize = 128 * 1024; // 128 KB
+
+const FINAL_EXPORT_PATH: &str = "/Users/saujanya/sandisk_media/final_export";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Duplicates {
@@ -22,6 +25,7 @@ pub struct Duplicates {
     pub file_size: u64,
     pub exif_data: Option<ExifData>,
     pub media: Media,
+    pub final_path: PathBuf,
 }
 
 pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
@@ -55,6 +59,7 @@ pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
                 file_size: media_files[0].file_size,
                 exif_data: media_files[0].clone().exif_data,
                 media: media_files.get(0).unwrap().clone(),
+                final_path: PathBuf::from(final_path_for_media(media_files[0].clone())),
             })
         })
         .collect::<io::Result<Vec<Duplicates>>>();
@@ -62,6 +67,32 @@ pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
     println!("Done Duplicate data");
 
     return duplicate_files;
+}
+
+fn final_path_for_media(media: Media) -> String {
+    let date_taken = media
+        .exif_data
+        .as_ref()
+        .and_then(|e| e.date_taken.as_ref())
+        .map(|s| s.as_str())
+        .unwrap_or("");
+
+    let formatted_date = NaiveDateTime::parse_from_str(date_taken, "%Y-%m-%d %H:%M:%S")
+        .expect("Invalid date time format");
+
+    let year = formatted_date.year();
+    let month = formatted_date.month();
+    let day_of_month = formatted_date.day();
+
+    format!(
+        "{}/{}/{}/{}/{}/{}",
+        FINAL_EXPORT_PATH,
+        year,
+        month,
+        day_of_month,
+        media.file_type.to_string(),
+        media.file_name
+    )
 }
 
 pub fn calculate_hash(path: &Path) -> io::Result<String> {
