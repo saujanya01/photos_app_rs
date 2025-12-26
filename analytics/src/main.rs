@@ -24,7 +24,7 @@ fn main() -> io::Result<()> {
 
     export_to_csv(duplicates.clone(), "./test.csv")?;
 
-    export_images_to_new_destination(duplicates)?;
+    // export_images_to_new_destination(duplicates)?;
 
     Ok(())
 }
@@ -36,6 +36,7 @@ fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
     wrt.write_record(&[
         "Hash",
         "File Name",
+        "Media Type",
         "Count",
         "Final File Path",
         "Old File Path(s)",
@@ -69,6 +70,7 @@ fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
         wrt.write_record(&[
             &media.hash,
             &media.media.file_name,
+            &media.file_type.to_string(),
             &count_str,
             final_path.to_str().unwrap_or(""),
             &old_paths,

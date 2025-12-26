@@ -78,7 +78,7 @@ fn final_path_for_media(media: Media) -> String {
         .unwrap_or("");
 
     let formatted_date = NaiveDateTime::parse_from_str(date_taken, "%Y-%m-%d %H:%M:%S")
-        .expect("Invalid date time format");
+        .unwrap_or_else(|_| panic!("Invalid date time format, {:?}", media));
 
     let year = formatted_date.year();
     let month = formatted_date.month();

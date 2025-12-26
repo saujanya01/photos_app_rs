@@ -1,4 +1,5 @@
 use exif::{In, Reader, Tag};
+use media_info::VideoInfo;
 use serde::Serialize;
 use std::io::Write;
 use std::{
@@ -124,7 +125,15 @@ pub struct ExifData {
 }
 
 impl ExifData {
-    pub fn from_file(path: &Path) -> Option<Self> {
+    pub fn from_file(path: &Path, file_type: FileType) -> Option<Self> {
+        match file_type {
+            FileType::Image(_) => Self::from_image(path),
+            FileType::Video(_) => Self::from_video(path),
+            _ => None,
+        }
+    }
+
+    fn from_image(path: &Path) -> Option<Self> {
         let file = File::open(path).ok()?;
         let mut bufreader = BufReader::new(&file);
         let exifreader = Reader::new().read_from_container(&mut bufreader).ok()?;
@@ -160,7 +169,40 @@ impl ExifData {
                 .map(|f| f.display_value().to_string()),
         })
     }
+
+    fn from_video(path: &Path) -> Option<Self> {
+        let video_info = VideoInfo::new(path).unwrap();
+
+        let creation_time = video_info.creation_date;
+
+        let parsable = Self::to_naive_parseable(&creation_time).unwrap();
+
+        Some(ExifData {
+            camera_make: None,
+            camera_model: None,
+            lens_model: None,
+            date_taken: Some(parsable.to_string()),
+            iso: None,
+            aperture: None,
+            shutter_speed: None,
+            focal_length: None,
+            software: None,
+        })
+    }
+
+    fn to_naive_parseable(datetime: &str) -> Option<String> {
+        // Expected input: 2025-07-30T12:20:10.000000Z
+
+        let without_z = datetime.strip_suffix('Z')?;
+
+        let (date, time) = without_z.split_once('T')?;
+
+        let time_no_frac = time.split('.').next()?;
+
+        Some(format!("{date} {time_no_frac}"))
+    }
 }
+
 #[derive(Debug, Clone, Serialize)]
 pub struct Media {
     pub file_path: PathBuf,
@@ -193,11 +235,13 @@ impl Media {
             .to_string();
 
         // Extract EXIF data for images
-        let exif_data = if file_type.is_image() {
-            ExifData::from_file(path)
-        } else {
-            None
-        };
+        // let exif_data = if file_type.is_image() {
+        //     ExifData::from_file(path)
+        // } else {
+        //     None
+        // };
+
+        let exif_data = ExifData::from_file(path, file_type.clone());
 
         let hash = calculate_hash(path)?;
 
@@ -211,6 +255,7 @@ impl Media {
         })
     }
 }
+
 // pub fn scan_directory(path: &Path, media_items: &mut Vec<Media>) -> io::Result<()> {
 pub fn scan_directory(path: &Path) -> io::Result<Vec<Media>> {
     let mut media_items: Vec<Media> = Vec::new();
@@ -227,14 +272,12 @@ pub fn scan_directory(path: &Path) -> io::Result<Vec<Media>> {
         } else {
             let file_type = FileType::from_path(&path).unwrap();
 
-            if file_type.is_image() {
+            if file_type.is_image() || file_type.is_video() {
                 match Media::new(&path) {
                     Ok(media) => {
                         println!("Scanned Media {:?}", media.file_name);
 
-                        if media.file_type.is_image() {
-                            media_items.push(media);
-                        }
+                        media_items.push(media);
                     }
                     Err(e) => {
                         println!(
@@ -251,18 +294,6 @@ pub fn scan_directory(path: &Path) -> io::Result<Vec<Media>> {
     println!("Done media scan");
 
     Ok(media_items)
-}
-
-// Export to JSON
-pub fn export_to_json(media_items: &[Media], output_path: &str) -> io::Result<()> {
-    let json = serde_json::to_string_pretty(media_items)
-        .map_err(|e| io::Error::new(io::ErrorKind::Other, e))?;
-
-    let mut file = File::create(output_path)?;
-    file.write_all(json.as_bytes())?;
-
-    println!("✅ Exported to {}", output_path);
-    Ok(())
 }
 
 pub fn export_images_to_new_destination(data: Vec<Duplicates>) -> io::Result<()> {
