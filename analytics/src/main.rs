@@ -22,11 +22,24 @@ fn main() -> io::Result<()> {
 
     println!("Scan Duration : {:?}", scan_duration);
 
-    export_to_csv(duplicates.clone(), "./test.csv")?;
+    export_to_csv(duplicates.clone(), "./final_export.csv")?;
 
-    // export_images_to_new_destination(duplicates)?;
+    let waste_space = calculate_waste_space(duplicates.clone());
+    println!("Waste Space : {:?}", format_size(waste_space));
+
+    export_images_to_new_destination(duplicates)?;
 
     Ok(())
+}
+
+fn calculate_waste_space(data: Vec<Duplicates>) -> u64 {
+    let mut total_waste_space = 0;
+
+    for duplicate in data {
+        total_waste_space += duplicate.file_size * (duplicate.count as u64 - 1);
+    }
+
+    total_waste_space
 }
 
 fn export_to_csv(data: Vec<Duplicates>, output_path: &str) -> io::Result<()> {
