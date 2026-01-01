@@ -1,24 +1,35 @@
+mod database;
 mod utils;
 
 use std::io;
 use std::time::Instant;
 
+use rusqlite::Connection;
+
+use crate::database::connection::Database;
 use crate::utils::duplicates::{Duplicates, find_duplicates};
 use crate::utils::{export_images_to_new_destination, scan_directory};
 
+const ROOT_PROJECT_PATH: &str = "/Users/saujanya/sandisk_media";
+
 fn main() -> io::Result<()> {
-    // let path = "./test_folder";
+    let path = ROOT_PROJECT_PATH;
 
-    let path = "/Users/saujanya/sandisk_media";
+    let db = Database::new(format!("{}/.photo_app_rs/sqlite.db", ".")).unwrap_or_else(|e| {
+        panic!("Error connecting to database: {}", e);
+    });
 
-    // Measure time for directory scanning
+    Ok(())
+}
+
+fn do_it(path: &str) -> io::Result<()> {
     let scan_start = Instant::now();
 
     let media_items = scan_directory(path.as_ref())?;
 
-    let scan_duration = scan_start.elapsed();
-
     let duplicates = find_duplicates(media_items)?;
+
+    let scan_duration = scan_start.elapsed();
 
     println!("Scan Duration : {:?}", scan_duration);
 

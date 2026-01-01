@@ -1,7 +1,6 @@
 use exif::{In, Reader, Tag};
 use media_info::VideoInfo;
 use serde::Serialize;
-use std::io::Write;
 use std::{
     fs::{self, File},
     io::{self, BufReader},
@@ -10,6 +9,7 @@ use std::{
 
 use crate::utils::duplicates::{Duplicates, calculate_hash};
 
+pub mod core;
 pub mod duplicates;
 
 #[derive(Debug, Clone, Serialize)]
@@ -33,7 +33,6 @@ impl ImageFormat {
             "png" => Some(Self::Png),
             "heic" => Some(Self::Heic),
             "tiff" | "tif" => Some(Self::Tiff),
-            "gif" => Some(Self::Gif),
             "bmp" => Some(Self::Bmp),
             _ => None,
         }
