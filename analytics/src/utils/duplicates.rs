@@ -6,14 +6,14 @@ use std::{
 };
 
 use chrono::{Datelike, NaiveDateTime};
+use rusqlite::Connection;
 use serde::Serialize;
 use sha2::{Digest, Sha256};
 
-use crate::utils::{ExifData, FileType, Media};
+use crate::database::operations;
+use crate::utils::core::{ExifData, FileType, Media};
 
 const PARTIAL_HASH_SIZE: usize = 128 * 1024; // 128 KB
-
-const FINAL_EXPORT_PATH: &str = "/Users/saujanya/sandisk_media/final_export";
 
 #[derive(Debug, Clone, Serialize)]
 pub struct Duplicates {
@@ -28,7 +28,11 @@ pub struct Duplicates {
     pub final_path: PathBuf,
 }
 
-pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
+pub fn find_duplicates(
+    conn: &Connection,
+    data: Vec<Media>,
+    destination_path: &Path,
+) -> io::Result<Vec<Duplicates>> {
     let mut hash_map: HashMap<String, Vec<Media>> = HashMap::new();
 
     for media in data {
@@ -50,6 +54,14 @@ pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
 
             println!("Duplcate File : {:?}", media_files[0].file_path);
 
+            // Insert duplicate group data into database
+            operations::insert_duplicate_group(conn, &media_files[0]).unwrap_or_else(|e| {
+                println!(
+                    "Error inserting duplicate group to database; Hash : {:?}; Error : {:?}",
+                    media_files[0].hash, e
+                );
+            });
+
             Ok(Duplicates {
                 hash,
                 count: media_files.len(),
@@ -59,7 +71,10 @@ pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
                 file_size: media_files[0].file_size,
                 exif_data: media_files[0].clone().exif_data,
                 media: media_files.get(0).unwrap().clone(),
-                final_path: PathBuf::from(final_path_for_media(media_files[0].clone())),
+                final_path: PathBuf::from(final_path_for_media(
+                    media_files[0].clone(),
+                    destination_path.to_str().unwrap(),
+                )),
             })
         })
         .collect::<io::Result<Vec<Duplicates>>>();
@@ -69,7 +84,7 @@ pub fn find_duplicates(data: Vec<Media>) -> io::Result<Vec<Duplicates>> {
     return duplicate_files;
 }
 
-fn final_path_for_media(media: Media) -> String {
+fn final_path_for_media(media: Media, destination_path: &str) -> String {
     let date_taken = media
         .exif_data
         .as_ref()
@@ -86,7 +101,7 @@ fn final_path_for_media(media: Media) -> String {
 
     format!(
         "{}/{}/{}/{}/{}/{}",
-        FINAL_EXPORT_PATH,
+        destination_path,
         year,
         month,
         day_of_month,

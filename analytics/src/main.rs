@@ -2,46 +2,68 @@ mod database;
 mod utils;
 
 use std::io;
-use std::time::Instant;
-
-use rusqlite::Connection;
+use std::path::Path;
 
 use crate::database::connection::Database;
+use crate::database::operations;
+use crate::utils::core::{export_images_to_new_destination, scan_directory};
 use crate::utils::duplicates::{Duplicates, find_duplicates};
-use crate::utils::{export_images_to_new_destination, scan_directory};
 
-const ROOT_PROJECT_PATH: &str = "/Users/saujanya/sandisk_media";
-
+// const ROOT_PROJECT_PATH: &str = "/Users/saujanya/sandisk_media";
+const ROOT_PROJECT_PATH: &str = "./test_folder";
 fn main() -> io::Result<()> {
-    let path = ROOT_PROJECT_PATH;
+    let source_path = ROOT_PROJECT_PATH;
+
+    let destination_path = format!("{}/final_export", ROOT_PROJECT_PATH);
 
     let db = Database::new(format!("{}/.photo_app_rs/sqlite.db", ".")).unwrap_or_else(|e| {
         panic!("Error connecting to database: {}", e);
     });
 
-    Ok(())
-}
+    let backup_session_id = database::operations::new_backup_session(
+        &db.conn(),
+        source_path.as_ref(),
+        destination_path.as_ref(),
+    )
+    .unwrap();
 
-fn do_it(path: &str) -> io::Result<()> {
-    let scan_start = Instant::now();
+    let media_items = scan_directory(&db.conn(), Path::new(source_path))?;
 
-    let media_items = scan_directory(path.as_ref())?;
-
-    let duplicates = find_duplicates(media_items)?;
-
-    let scan_duration = scan_start.elapsed();
-
-    println!("Scan Duration : {:?}", scan_duration);
+    let duplicates = find_duplicates(&db.conn(), media_items, Path::new(&destination_path))?;
 
     export_to_csv(duplicates.clone(), "./final_export.csv")?;
 
     let waste_space = calculate_waste_space(duplicates.clone());
+
     println!("Waste Space : {:?}", format_size(waste_space));
 
     export_images_to_new_destination(duplicates)?;
 
+    operations::update_backup_session_completed(&db.conn(), backup_session_id).unwrap();
+
     Ok(())
 }
+
+// fn do_it(path: &str) -> io::Result<()> {
+//     let scan_start = Instant::now();
+
+//     let media_items = scan_directory(path.as_ref())?;
+
+//     let duplicates = find_duplicates(media_items)?;
+
+//     let scan_duration = scan_start.elapsed();
+
+//     println!("Scan Duration : {:?}", scan_duration);
+
+//     export_to_csv(duplicates.clone(), "./final_export.csv")?;
+
+//     let waste_space = calculate_waste_space(duplicates.clone());
+//     println!("Waste Space : {:?}", format_size(waste_space));
+
+//     export_images_to_new_destination(duplicates)?;
+
+//     Ok(())
+// }
 
 fn calculate_waste_space(data: Vec<Duplicates>) -> u64 {
     let mut total_waste_space = 0;
