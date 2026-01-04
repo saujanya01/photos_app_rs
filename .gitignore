@@ -6,3 +6,5 @@
 .DS_Store
 
 **/.photo_app_rs/
+
+**/csv_exports/

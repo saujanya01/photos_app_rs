@@ -3,20 +3,22 @@ mod utils;
 
 use std::io;
 use std::path::Path;
+use std::sync::{Arc, Mutex};
 
 use crate::database::connection::Database;
 use crate::database::operations;
 use crate::utils::core::{export_images_to_new_destination, scan_directory};
 use crate::utils::duplicates::{Duplicates, find_duplicates};
 
-// const ROOT_PROJECT_PATH: &str = "/Users/saujanya/sandisk_media";
-const ROOT_PROJECT_PATH: &str = "./test_folder";
+const ROOT_PROJECT_PATH: &str = "/Users/saujanya/sandisk_media";
+// const ROOT_PROJECT_PATH: &str = "./test_folder";
 fn main() -> io::Result<()> {
     let source_path = ROOT_PROJECT_PATH;
 
     let destination_path = format!("{}/final_export", ROOT_PROJECT_PATH);
 
-    let db = Database::new(format!("{}/.photo_app_rs/sqlite.db", ".")).unwrap_or_else(|e| {
+    let db_path = format!("{}/.photo_app_rs/sqlite.db", ".");
+    let db = Database::new(&db_path).unwrap_or_else(|e| {
         panic!("Error connecting to database: {}", e);
     });
 
@@ -27,11 +29,40 @@ fn main() -> io::Result<()> {
     )
     .unwrap();
 
+    // Set up graceful shutdown handler
+    let session_id_shared = Arc::new(Mutex::new(Some(backup_session_id)));
+    let db_path_shared = Arc::new(db_path.clone());
+    let session_id_for_handler = session_id_shared.clone();
+    let db_path_for_handler = db_path_shared.clone();
+
+    ctrlc::set_handler(move || {
+        println!("\nReceived interrupt signal. Cancelling backup session...");
+
+        if let Ok(session_id_guard) = session_id_for_handler.lock() {
+            if let Some(session_id) = *session_id_guard {
+                if let Ok(db) = Database::new(&*db_path_for_handler) {
+                    if let Err(e) =
+                        operations::update_backup_session_cancelled(db.conn(), session_id)
+                    {
+                        eprintln!("Error updating backup session to cancelled: {}", e);
+                    } else {
+                        println!("Backup session marked as cancelled.");
+                    }
+                } else {
+                    eprintln!("Error connecting to database for cleanup.");
+                }
+            }
+        }
+
+        std::process::exit(130); // Standard exit code for SIGINT
+    })
+    .expect("Error setting Ctrl+C handler");
+
     let media_items = scan_directory(&db.conn(), Path::new(source_path))?;
 
     let duplicates = find_duplicates(&db.conn(), media_items, Path::new(&destination_path))?;
 
-    export_to_csv(duplicates.clone(), "./final_export.csv")?;
+    export_to_csv(duplicates.clone(), "./csv_exports/final_export.csv")?;
 
     let waste_space = calculate_waste_space(duplicates.clone());
 
@@ -39,31 +70,13 @@ fn main() -> io::Result<()> {
 
     export_images_to_new_destination(duplicates)?;
 
+    // Clear the session_id from shared state since we're completing normally
+    *session_id_shared.lock().unwrap() = None;
+
     operations::update_backup_session_completed(&db.conn(), backup_session_id).unwrap();
 
     Ok(())
 }
-
-// fn do_it(path: &str) -> io::Result<()> {
-//     let scan_start = Instant::now();
-
-//     let media_items = scan_directory(path.as_ref())?;
-
-//     let duplicates = find_duplicates(media_items)?;
-
-//     let scan_duration = scan_start.elapsed();
-
-//     println!("Scan Duration : {:?}", scan_duration);
-
-//     export_to_csv(duplicates.clone(), "./final_export.csv")?;
-
-//     let waste_space = calculate_waste_space(duplicates.clone());
-//     println!("Waste Space : {:?}", format_size(waste_space));
-
-//     export_images_to_new_destination(duplicates)?;
-
-//     Ok(())
-// }
 
 fn calculate_waste_space(data: Vec<Duplicates>) -> u64 {
     let mut total_waste_space = 0;

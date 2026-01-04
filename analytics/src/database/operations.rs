@@ -40,6 +40,20 @@ pub fn update_backup_session_completed(conn: &Connection, session_id: i64) -> ru
 
     Ok(())
 }
+
+pub fn update_backup_session_cancelled(conn: &Connection, session_id: i64) -> rusqlite::Result<()> {
+    let now = SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs();
+
+    conn.execute(
+        "UPDATE backup_sessions SET status = 'cancelled', completed_at = ?1 WHERE id = ?2",
+        (now as i64, session_id),
+    )?;
+
+    Ok(())
+}
 pub fn insert_media_file(conn: &Connection, media: &Media) -> rusqlite::Result<()> {
     // We know the file exists since we just created Media from it, so unwrap is safe
     let metadata = fs::metadata(&media.file_path).unwrap();
