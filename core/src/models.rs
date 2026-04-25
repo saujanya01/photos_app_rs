@@ -23,6 +23,24 @@ pub struct MediaFile {
     pub path: String,
     pub date_added: i64,
     pub date_modified: i64,
+
+    // v0.6 additions — populated lazily by later phases
+    pub gps_latitude: Option<f64>,
+    pub gps_longitude: Option<f64>,
+    pub dominant_color: Option<String>,
+    pub rating: i32,
+}
+
+/// User-curated album. ID is a TEXT slug (e.g. "ed26") to match the
+/// portable-sidecar design — autoincrement IDs would collide across drives.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Album {
+    pub id: String,
+    pub name: String,
+    pub description: Option<String>,
+    pub cover_media_id: Option<i64>,
+    pub created_at: i64,
+    pub updated_at: i64,
 }
 
 /// A group of media items for a specific date in the timeline

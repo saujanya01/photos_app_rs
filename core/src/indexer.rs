@@ -219,6 +219,12 @@ fn process_new_file(
         path: path.to_string(),
         date_added,
         date_modified,
+        // GPS, dominant_color, and rating are populated by later phases
+        // (Map / Viewer / Multi-select). Defaults preserve schema invariants.
+        gps_latitude: None,
+        gps_longitude: None,
+        dominant_color: None,
+        rating: 0,
     };
 
     // Insert into database
