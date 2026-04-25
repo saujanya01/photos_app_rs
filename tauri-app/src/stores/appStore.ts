@@ -18,6 +18,8 @@ export interface IndexStats {
   date_range: [string | null, string | null];
 }
 
+export type ViewMode = "grid" | "map";
+
 interface AppState {
   filter: SearchFilter;
   setFilter: (f: Partial<SearchFilter>) => void;
@@ -27,6 +29,11 @@ interface AppState {
   setViewingMedia: (id: number | null) => void;
   scanning: boolean;
   setScanning: (s: boolean) => void;
+  viewMode: ViewMode;
+  setViewMode: (m: ViewMode) => void;
+  /** Last directory the user pointed at — drives the offline indicator. */
+  lastScanRoot: string | null;
+  setLastScanRoot: (p: string | null) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -38,4 +45,8 @@ export const useAppStore = create<AppState>((set) => ({
   setViewingMedia: (id) => set({ viewingMedia: id }),
   scanning: false,
   setScanning: (s) => set({ scanning: s }),
+  viewMode: "grid",
+  setViewMode: (m) => set({ viewMode: m }),
+  lastScanRoot: null,
+  setLastScanRoot: (p) => set({ lastScanRoot: p }),
 }));

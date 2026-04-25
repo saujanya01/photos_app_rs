@@ -9,6 +9,12 @@ export interface MediaItem {
   camera_model: string | null;
   file_path: string;
   thumb_small_b64: string | null;
+
+  resolution_width: number | null;
+  resolution_height: number | null;
+  duration_seconds: number | null;
+  rating: number;
+  dominant_color: string | null;
 }
 
 export interface TimelineGroup {
@@ -37,6 +43,10 @@ export interface MediaFile {
   path: string;
   date_added: number;
   date_modified: number;
+  gps_latitude: number | null;
+  gps_longitude: number | null;
+  dominant_color: string | null;
+  rating: number;
 }
 
 export async function scanDirectory(path: string): Promise<number> {

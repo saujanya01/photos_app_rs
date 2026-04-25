@@ -2,31 +2,204 @@
 @tailwind components;
 @tailwind utilities;
 
+/* ============================================================
+   photo_app_rs — design tokens (claude_design_doc.md §2–§5)
+   ============================================================ */
 :root {
-  font-family: Inter, system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
+  --accent-h: 60;
+
+  /* surfaces — warm-leaning neutrals (hue 60°, low chroma) */
+  --ink-0: oklch(0.12 0.005 60); /* viewer */
+  --ink-1: oklch(0.16 0.006 60); /* canvas */
+  --ink-2: oklch(0.19 0.006 60); /* chrome */
+  --ink-3: oklch(0.23 0.007 60); /* raised / hover */
+  --ink-4: oklch(0.28 0.008 60); /* border stark */
+  --ink-5: oklch(0.34 0.009 60); /* border bright */
+  --hair: oklch(1 0 0 / 0.06);
+  --hair-2: oklch(1 0 0 / 0.1);
+
+  /* foreground */
+  --fg-0: oklch(0.97 0.006 80);
+  --fg-1: oklch(0.86 0.006 80);
+  --fg-2: oklch(0.68 0.006 80);
+  --fg-3: oklch(0.52 0.006 80);
+  --fg-4: oklch(0.4 0.006 80);
+
+  /* single accent — warm amber */
+  --accent: oklch(0.78 0.14 var(--accent-h));
+  --accent-2: oklch(0.7 0.14 var(--accent-h));
+  --accent-soft: oklch(0.78 0.14 var(--accent-h) / 0.14);
+
+  /* semantic — status bar / toasts only */
+  --ok: oklch(0.78 0.14 150);
+  --warn: oklch(0.78 0.14 70);
+  --err: oklch(0.7 0.17 25);
+
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-lg: 10px;
+
+  font-family: "Inter Tight", ui-sans-serif, system-ui, -apple-system,
+    "SF Pro Text", sans-serif;
+  font-feature-settings: "ss01", "cv11";
   color-scheme: dark;
 }
 
+html,
 body {
+  background: var(--ink-1);
+  color: var(--fg-1);
   margin: 0;
   min-height: 100vh;
 }
 
-/* Scrollbar styling */
-::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
+/* ============================================================
+   helper classes — used across components instead of long
+   inline styles. Mirrors the Claude Design prototype.
+   ============================================================ */
+.surface-0 { background: var(--ink-0); }
+.surface-1 { background: var(--ink-1); }
+.surface-2 { background: var(--ink-2); }
+.surface-3 { background: var(--ink-3); }
+
+.fg-0 { color: var(--fg-0); }
+.fg-1 { color: var(--fg-1); }
+.fg-2 { color: var(--fg-2); }
+.fg-3 { color: var(--fg-3); }
+.fg-4 { color: var(--fg-4); }
+
+.accent { color: var(--accent); }
+.bg-accent { background: var(--accent); color: var(--ink-1); }
+.bg-accent-soft { background: var(--accent-soft); color: var(--accent); }
+
+.hair { border-color: var(--hair); }
+.hair-2 { border-color: var(--hair-2); }
+
+.mono {
+  font-family: "JetBrains Mono", ui-monospace, "SF Mono", Menlo, monospace;
+  font-feature-settings: "zero", "ss01";
 }
 
-::-webkit-scrollbar-track {
-  background: rgb(38 38 38);
+.tight { letter-spacing: -0.014em; }
+.tighter { letter-spacing: -0.022em; }
+
+.wide-kicker {
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 500;
+  font-size: 10.5px;
+  color: var(--fg-3);
 }
 
-::-webkit-scrollbar-thumb {
-  background: rgb(82 82 82);
+/* subtle vibrancy on chrome — layered noise + gradient */
+.vibrancy {
+  background:
+    linear-gradient(180deg, oklch(1 0 0 / 0.012), oklch(0 0 0 / 0) 60%),
+    var(--ink-2);
+  backdrop-filter: saturate(140%);
+}
+
+/* date headers */
+.date-stick {
+  position: sticky;
+  top: 0;
+  z-index: 5;
+  background: linear-gradient(
+    180deg,
+    oklch(0.16 0.006 60 / 0.92),
+    oklch(0.16 0.006 60 / 0.72)
+  );
+  backdrop-filter: blur(10px) saturate(130%);
+}
+
+/* tile — rounded raised square with a hairline ring on top */
+.tile {
+  position: relative;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--ink-3);
+  transition: transform 160ms cubic-bezier(0.2, 0.7, 0.2, 1);
+  display: block;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+.tile::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  box-shadow: inset 0 0 0 1px oklch(1 0 0 / 0.06);
+  border-radius: inherit;
+  pointer-events: none;
+}
+.tile:hover {
+  transform: translateY(-1px);
+}
+.tile.selected {
+  box-shadow:
+    0 0 0 2px var(--accent),
+    0 6px 20px -8px oklch(0 0 0 / 0.6);
+}
+
+/* focus ring (keyboard) */
+.focus-ring:focus-visible {
+  outline: none;
+  box-shadow:
+    0 0 0 1.5px var(--accent),
+    0 0 0 3px oklch(0.78 0.14 var(--accent-h) / 0.2);
+}
+
+/* keyboard chip */
+.kbd {
+  font-family: "JetBrains Mono", monospace;
+  font-size: 10.5px;
+  background: var(--ink-3);
+  color: var(--fg-2);
+  border: 1px solid var(--hair-2);
+  border-bottom-width: 2px;
+  padding: 1.5px 5px;
   border-radius: 4px;
 }
 
+/* smooth entry */
+@keyframes riseIn {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+.rise {
+  animation: riseIn 240ms cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .rise {
+    animation: none;
+  }
+  .tile {
+    transition: none;
+  }
+}
+
+/* scrollbar */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--ink-4);
+  border-radius: 10px;
+  border: 2px solid transparent;
+  background-clip: padding-box;
+}
 ::-webkit-scrollbar-thumb:hover {
-  background: rgb(115 115 115);
+  background: var(--ink-5);
+  background-clip: padding-box;
 }
