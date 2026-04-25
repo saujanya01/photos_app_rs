@@ -6,10 +6,14 @@ use crate::search::build_where_clause;
 
 const MIGRATION_001: &str = include_str!("../../migrations/001_initial_schema.sql");
 const MIGRATION_002: &str = include_str!("../../migrations/002_thumbnails_and_search.sql");
+const MIGRATION_003: &str = include_str!("../../migrations/003_gps.sql");
+const MIGRATION_004: &str = include_str!("../../migrations/004_v06_extensions.sql");
 
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", MIGRATION_001),
     ("002_thumbnails_and_search", MIGRATION_002),
+    ("003_gps", MIGRATION_003),
+    ("004_v06_extensions", MIGRATION_004),
 ];
 
 /// Opens a SQLite database, enables foreign keys, WAL mode, and runs migrations
@@ -151,7 +155,8 @@ pub fn get_media_detail(conn: &Connection, id: i64) -> Result<MediaFile> {
                 camera_make, camera_model, lens_model, date_taken,
                 iso, aperture, shutter_speed, focal_length, software,
                 duration_seconds, resolution_width, resolution_height,
-                path, date_added, date_modified
+                path, date_added, date_modified,
+                gps_latitude, gps_longitude, dominant_color, rating
          FROM media_files WHERE id = ?1",
         [id],
         |row| {
@@ -176,6 +181,10 @@ pub fn get_media_detail(conn: &Connection, id: i64) -> Result<MediaFile> {
                 path: row.get(17)?,
                 date_added: row.get(18)?,
                 date_modified: row.get(19)?,
+                gps_latitude: row.get(20)?,
+                gps_longitude: row.get(21)?,
+                dominant_color: row.get(22)?,
+                rating: row.get(23)?,
             })
         },
     )
@@ -290,10 +299,12 @@ pub fn insert_media_file(conn: &Connection, media: &MediaFile) -> Result<i64> {
             camera_make, camera_model, lens_model, date_taken,
             iso, aperture, shutter_speed, focal_length, software,
             duration_seconds, resolution_width, resolution_height,
-            path, date_added, date_modified
+            path, date_added, date_modified,
+            gps_latitude, gps_longitude, dominant_color, rating
         ) VALUES (
             ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
-            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
+            ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19,
+            ?20, ?21, ?22, ?23
         )",
         rusqlite::params![
             media.hash,
@@ -314,7 +325,11 @@ pub fn insert_media_file(conn: &Connection, media: &MediaFile) -> Result<i64> {
             media.resolution_height,
             media.path,
             media.date_added,
-            media.date_modified
+            media.date_modified,
+            media.gps_latitude,
+            media.gps_longitude,
+            media.dominant_color,
+            media.rating,
         ],
     )?;
 
@@ -334,4 +349,188 @@ pub fn insert_thumbnail(
         rusqlite::params![media_file_id, thumb_small, thumb_medium],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn columns_of(conn: &Connection, table: &str) -> Vec<String> {
+        let mut stmt = conn
+            .prepare(&format!("PRAGMA table_info({})", table))
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(1))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    fn applied(conn: &Connection) -> Vec<String> {
+        let mut stmt = conn
+            .prepare("SELECT version FROM __schema_migrations ORDER BY version")
+            .unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(0))
+            .unwrap()
+            .filter_map(|r| r.ok())
+            .collect()
+    }
+
+    #[test]
+    fn migrations_apply_to_fresh_db() {
+        let tmp = std::env::temp_dir().join(format!("phorsmig-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+        let conn = open_db(tmp.to_str().unwrap()).expect("open_db");
+
+        let versions = applied(&conn);
+        assert_eq!(
+            versions,
+            vec![
+                "001_initial",
+                "002_thumbnails_and_search",
+                "003_gps",
+                "004_v06_extensions",
+            ]
+        );
+
+        let cols = columns_of(&conn, "media_files");
+        for c in [
+            "gps_latitude",
+            "gps_longitude",
+            "dominant_color",
+            "rating",
+        ] {
+            assert!(cols.iter().any(|x| x == c), "missing column {c}");
+        }
+
+        for table in ["albums", "album_items"] {
+            let exists: i64 = conn
+                .query_row(
+                    "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
+                    [table],
+                    |row| row.get(0),
+                )
+                .unwrap();
+            assert_eq!(exists, 1, "missing table {table}");
+        }
+
+        drop(conn);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn upgrades_from_002_preserve_existing_rows() {
+        // Simulate the real-world case: a DB sitting at migrations 001+002
+        // with existing media_files rows, then upgrading to 003+004.
+        let tmp = std::env::temp_dir().join(format!("phorsupg-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+
+        // Stand up a DB with only 001+002 applied, then insert a row.
+        {
+            let mut c = Connection::open(&tmp).unwrap();
+            c.execute_batch("PRAGMA foreign_keys = ON;").unwrap();
+            c.execute_batch(
+                "CREATE TABLE __schema_migrations (version TEXT PRIMARY KEY, \
+                 applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);",
+            )
+            .unwrap();
+            for (v, sql) in &MIGRATIONS[..2] {
+                let tx = c.transaction().unwrap();
+                tx.execute_batch(sql).unwrap();
+                tx.execute(
+                    "INSERT INTO __schema_migrations (version) VALUES (?1)",
+                    [v],
+                )
+                .unwrap();
+                tx.commit().unwrap();
+            }
+            c.execute(
+                "INSERT INTO media_files (
+                    hash, file_size_bytes, media_type, extension, path,
+                    date_added, date_modified
+                 ) VALUES ('preexisting', 100, 'image', 'jpg', '/old.jpg', 0, 0)",
+                [],
+            )
+            .unwrap();
+        }
+
+        // Now open via the real path — should apply 003+004 cleanly.
+        let conn = open_db(tmp.to_str().unwrap()).expect("upgrade open");
+
+        assert_eq!(applied(&conn).len(), 4);
+
+        // The pre-existing row survived and has default values for new columns.
+        let (rating, lat, color): (i32, Option<f64>, Option<String>) = conn
+            .query_row(
+                "SELECT rating, gps_latitude, dominant_color FROM media_files WHERE hash='preexisting'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(rating, 0);
+        assert_eq!(lat, None);
+        assert_eq!(color, None);
+
+        drop(conn);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn migrations_are_idempotent() {
+        let tmp = std::env::temp_dir().join(format!("phorsmig2-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+
+        let _ = open_db(tmp.to_str().unwrap()).expect("first open");
+        let conn = open_db(tmp.to_str().unwrap()).expect("second open");
+
+        let versions = applied(&conn);
+        assert_eq!(versions.len(), 4, "duplicate migration entries: {versions:?}");
+
+        drop(conn);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn insert_round_trip_with_v06_columns() {
+        let tmp = std::env::temp_dir().join(format!("phorsmig3-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+        let conn = open_db(tmp.to_str().unwrap()).expect("open_db");
+
+        let m = MediaFile {
+            id: None,
+            hash: "deadbeef".into(),
+            file_size_bytes: 42,
+            media_type: "image".into(),
+            extension: "jpg".into(),
+            camera_make: None,
+            camera_model: None,
+            lens_model: None,
+            date_taken: None,
+            iso: None,
+            aperture: None,
+            shutter_speed: None,
+            focal_length: None,
+            software: None,
+            duration_seconds: None,
+            resolution_width: None,
+            resolution_height: None,
+            path: "/tmp/x.jpg".into(),
+            date_added: 0,
+            date_modified: 0,
+            gps_latitude: Some(35.6762),
+            gps_longitude: Some(139.6503),
+            dominant_color: Some("oklch(0.42 0.08 60)".into()),
+            rating: 4,
+        };
+
+        let id = insert_media_file(&conn, &m).expect("insert");
+        let back = get_media_detail(&conn, id).expect("fetch");
+
+        assert_eq!(back.gps_latitude, Some(35.6762));
+        assert_eq!(back.gps_longitude, Some(139.6503));
+        assert_eq!(back.dominant_color.as_deref(), Some("oklch(0.42 0.08 60)"));
+        assert_eq!(back.rating, 4);
+
+        drop(conn);
+        let _ = std::fs::remove_file(&tmp);
+    }
 }

@@ -20,6 +20,7 @@
 # Workspace members share the root Cargo.lock
 core/Cargo.lock
 
-# Local Claude Design handoff bundle (external reference, not source)
+# Local Claude Design handoff bundles (external reference, not source)
 *.zip
-photo-app-rs_design_handoff/
+photo-app-rs_design_handoff*/
+
