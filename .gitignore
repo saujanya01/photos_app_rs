@@ -8,3 +8,18 @@
 **/.photo_app_rs/
 
 **/csv_exports/
+
+**/node_modules/
+
+# Vite build output
+**/dist/
+
+# Tauri auto-generated schemas
+**/src-tauri/gen/
+
+# Workspace members share the root Cargo.lock
+core/Cargo.lock
+
+# Local Claude Design handoff bundle (external reference, not source)
+*.zip
+photo-app-rs_design_handoff/

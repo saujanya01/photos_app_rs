@@ -1,0 +1,21 @@
+{
+  "$schema": "https://schemas.tauri.app/v2/capabilities",
+  "identifier": "default",
+  "description": "Default capabilities for photo_app_rs",
+  "windows": ["main"],
+  "permissions": [
+    "core:default",
+    "core:window:default",
+    "core:webview:default",
+    "dialog:default",
+    "dialog:allow-open",
+    "fs:default",
+    "fs:allow-read-text-file",
+    "fs:allow-exists",
+    "fs:read-all",
+    {
+      "identifier": "fs:scope",
+      "allow": ["**"]
+    }
+  ]
+}

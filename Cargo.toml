@@ -1,3 +1,7 @@
+[workspace]
+members = ["analytics", "core", "tauri-app/src-tauri"]
+resolver = "2"
+
 [package]
 name = "photo_app_rs"
 version = "0.1.0"
