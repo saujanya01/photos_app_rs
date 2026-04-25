@@ -60,6 +60,13 @@ pub struct MediaItem {
     pub camera_model: Option<String>,
     pub file_path: String,
     pub thumb_small_b64: Option<String>,
+
+    // Tile-rendering hints — drive aspect ratio + video letterbox.
+    pub resolution_width: Option<i32>,
+    pub resolution_height: Option<i32>,
+    pub duration_seconds: Option<f64>,
+    pub rating: i32,
+    pub dominant_color: Option<String>,
 }
 
 /// Filter criteria for searching media

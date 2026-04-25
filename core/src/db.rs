@@ -8,12 +8,14 @@ const MIGRATION_001: &str = include_str!("../../migrations/001_initial_schema.sq
 const MIGRATION_002: &str = include_str!("../../migrations/002_thumbnails_and_search.sql");
 const MIGRATION_003: &str = include_str!("../../migrations/003_gps.sql");
 const MIGRATION_004: &str = include_str!("../../migrations/004_v06_extensions.sql");
+const MIGRATION_005: &str = include_str!("../../migrations/005_fts_and_backup_v2.sql");
 
 const MIGRATIONS: &[(&str, &str)] = &[
     ("001_initial", MIGRATION_001),
     ("002_thumbnails_and_search", MIGRATION_002),
     ("003_gps", MIGRATION_003),
     ("004_v06_extensions", MIGRATION_004),
+    ("005_fts_and_backup_v2", MIGRATION_005),
 ];
 
 /// Opens a SQLite database, enables foreign keys, WAL mode, and runs migrations
@@ -84,7 +86,12 @@ pub fn get_timeline(
             m.date_taken,
             m.camera_model,
             m.path,
-            t.thumb_small
+            t.thumb_small,
+            m.resolution_width,
+            m.resolution_height,
+            m.duration_seconds,
+            m.rating,
+            m.dominant_color
          FROM media_files m
          LEFT JOIN thumbnails t ON m.id = t.media_file_id
          WHERE 1=1 {}
@@ -117,6 +124,11 @@ pub fn get_timeline(
             camera_model: row.get(4)?,
             file_path: row.get(5)?,
             thumb_small_b64: thumb_b64,
+            resolution_width: row.get(7)?,
+            resolution_height: row.get(8)?,
+            duration_seconds: row.get(9)?,
+            rating: row.get(10)?,
+            dominant_color: row.get(11)?,
         })
     })?;
 
@@ -389,6 +401,7 @@ mod tests {
                 "002_thumbnails_and_search",
                 "003_gps",
                 "004_v06_extensions",
+                "005_fts_and_backup_v2",
             ]
         );
 
@@ -402,7 +415,12 @@ mod tests {
             assert!(cols.iter().any(|x| x == c), "missing column {c}");
         }
 
-        for table in ["albums", "album_items"] {
+        for table in [
+            "albums",
+            "album_items",
+            "backup_sessions_v2",
+            "backup_session_items",
+        ] {
             let exists: i64 = conn
                 .query_row(
                     "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?1",
@@ -412,6 +430,75 @@ mod tests {
                 .unwrap();
             assert_eq!(exists, 1, "missing table {table}");
         }
+
+        // media_fts is a virtual table — confirm it exists and the
+        // INSERT/DELETE/UPDATE triggers keep tags_text synced.
+        let fts_exists: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='media_fts'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(fts_exists, 1, "missing virtual table media_fts");
+
+        drop(conn);
+        let _ = std::fs::remove_file(&tmp);
+    }
+
+    #[test]
+    fn fts_index_picks_up_metadata_and_tags() {
+        let tmp = std::env::temp_dir().join(format!("phorsfts-{}.db", std::process::id()));
+        let _ = std::fs::remove_file(&tmp);
+        let conn = open_db(tmp.to_str().unwrap()).expect("open_db");
+
+        // Insert two media files with different camera models.
+        conn.execute(
+            "INSERT INTO media_files (
+                hash, file_size_bytes, media_type, extension, camera_model, path,
+                date_added, date_modified
+             ) VALUES ('h1', 1, 'image', 'arw', 'Sony A7 IV', '/a.arw', 0, 0)",
+            [],
+        )
+        .unwrap();
+        conn.execute(
+            "INSERT INTO media_files (
+                hash, file_size_bytes, media_type, extension, camera_model, path,
+                date_added, date_modified
+             ) VALUES ('h2', 1, 'image', 'jpg', 'Ricoh GR IIIx', '/b.jpg', 0, 0)",
+            [],
+        )
+        .unwrap();
+
+        // FTS picks up camera_model via the AFTER INSERT trigger.
+        let hits: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_fts WHERE media_fts MATCH 'Sony'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(hits, 1);
+
+        // Tag the Ricoh shot. The media_tags trigger should populate tags_text.
+        conn.execute("INSERT INTO tags (name) VALUES ('street')", [])
+            .unwrap();
+        conn.execute(
+            "INSERT INTO media_tags (media_file_id, tag_id)
+             SELECT m.id, t.id FROM media_files m, tags t
+             WHERE m.hash='h2' AND t.name='street'",
+            [],
+        )
+        .unwrap();
+
+        let tag_hits: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM media_fts WHERE media_fts MATCH 'street'",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap();
+        assert_eq!(tag_hits, 1, "tags_text should be searchable after tagging");
 
         drop(conn);
         let _ = std::fs::remove_file(&tmp);
@@ -453,10 +540,10 @@ mod tests {
             .unwrap();
         }
 
-        // Now open via the real path — should apply 003+004 cleanly.
+        // Now open via the real path — should apply 003..=005 cleanly.
         let conn = open_db(tmp.to_str().unwrap()).expect("upgrade open");
 
-        assert_eq!(applied(&conn).len(), 4);
+        assert_eq!(applied(&conn).len(), 5);
 
         // The pre-existing row survived and has default values for new columns.
         let (rating, lat, color): (i32, Option<f64>, Option<String>) = conn
@@ -483,7 +570,7 @@ mod tests {
         let conn = open_db(tmp.to_str().unwrap()).expect("second open");
 
         let versions = applied(&conn);
-        assert_eq!(versions.len(), 4, "duplicate migration entries: {versions:?}");
+        assert_eq!(versions.len(), 5, "duplicate migration entries: {versions:?}");
 
         drop(conn);
         let _ = std::fs::remove_file(&tmp);

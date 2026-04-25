@@ -14,6 +14,8 @@ fn main() {
             commands::get_full_path,
             commands::get_stats,
             commands::search_media,
+            commands::read_preferences,
+            commands::write_preferences,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

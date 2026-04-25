@@ -103,3 +103,50 @@ pub async fn search_media(filter: SearchFilter) -> Result<Vec<TimelineGroup>, St
     .await
     .map_err(|e| format!("Task failed: {}", e))?
 }
+
+// ============================================================
+// Preferences — Phase 3
+// Persisted as JSON at ~/.photo_app_rs/preferences.json. The shape
+// is opaque to Rust; the frontend owns the schema (see prefs.ts).
+// ============================================================
+fn get_prefs_path() -> Result<std::path::PathBuf, String> {
+    let home = dirs::home_dir().ok_or("Could not find home directory")?;
+    let dir = home.join(".photo_app_rs");
+    std::fs::create_dir_all(&dir)
+        .map_err(|e| format!("Failed to create app directory: {}", e))?;
+    Ok(dir.join("preferences.json"))
+}
+
+#[tauri::command]
+pub async fn read_preferences() -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(|| {
+        let path = get_prefs_path()?;
+        match std::fs::read_to_string(&path) {
+            Ok(s) => Ok(s),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok("{}".to_string()),
+            Err(e) => Err(format!("Failed to read preferences: {}", e)),
+        }
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
+
+#[tauri::command]
+pub async fn write_preferences(json: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        // Validate that what we're being asked to persist is JSON.
+        serde_json::from_str::<serde_json::Value>(&json)
+            .map_err(|e| format!("Invalid JSON: {}", e))?;
+        let path = get_prefs_path()?;
+        // Atomic-ish write: tmp file then rename, so a crash mid-write
+        // can never leave a half-written preferences file.
+        let tmp = path.with_extension("json.tmp");
+        std::fs::write(&tmp, json.as_bytes())
+            .map_err(|e| format!("Failed to write preferences: {}", e))?;
+        std::fs::rename(&tmp, &path)
+            .map_err(|e| format!("Failed to commit preferences: {}", e))?;
+        Ok(())
+    })
+    .await
+    .map_err(|e| format!("Task failed: {}", e))?
+}
